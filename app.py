@@ -10,8 +10,29 @@ It displays the landing page with navigation to three main features:
 """
 
 import streamlit as st
-import requests
-from utils.api_client import get_usage
+from utils.api_client import get_usage, make_request
+
+# ============================================================================
+# API HEALTH CHECK
+# ============================================================================
+
+def check_api_health():
+    """
+    Check API health and authentication status.
+    Returns tuple of (is_healthy: bool, message: str)
+    """
+    key = st.secrets.get("FRAGELLA_API_KEY")
+    if not key:
+        return False, "❌ FRAGELLA_API_KEY not configured in Streamlit Secrets"
+        
+    try:
+        usage_data = get_usage()
+        if usage_data and "requests_remaining" in usage_data:
+            return True, f"✅ API connected - {usage_data['requests_remaining']:,} requests remaining"
+        else:
+            return False, "❌ API response invalid - missing usage data"
+    except Exception as e:
+        return False, f"❌ API connection failed: {str(e)}"
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -212,60 +233,26 @@ st.write("")
 st.write("")
 st.write("")
 
-# Try to fetch and display API usage information (optional)
-try:
-    usage_data = get_usage()
-    if usage_data and "requests_remaining" in usage_data:
-        remaining = usage_data["requests_remaining"]
-        st.markdown(f"""
-        <div class="footer">
-            <p>Powered by Fragella API • {remaining:,} API requests remaining today</p>
-            <p style="font-size: 0.8rem; margin-top: 0.5rem;">
-                Built with Streamlit • Data updates in real-time
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        # Fallback if API call fails
-        st.markdown("""
-        <div class="footer">
-            <p>Powered by Fragella API</p>
-            <p style="font-size: 0.8rem; margin-top: 0.5rem;">
-                Built with Streamlit • Data updates in real-time
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-except Exception as e:
-    # If API is unavailable, show footer without usage info
-    st.markdown("""
+# Check API health and display status
+api_healthy, api_message = check_api_health()
+
+# Display appropriate footer based on API health
+if api_healthy:
+    st.markdown(f"""
     <div class="footer">
-        <p>Powered by Fragella API</p>
+        <p>{api_message}</p>
         <p style="font-size: 0.8rem; margin-top: 0.5rem;">
             Built with Streamlit • Data updates in real-time
         </p>
     </div>
     """, unsafe_allow_html=True)
-
-import streamlit as st, requests
-
-st.subheader("Fragella API health check")
-key = st.secrets.get("FRAGELLA_API_KEY")
-st.write("Secret loaded:", bool(key))
-
-if key:
-    try:
-        resp = requests.get(
-            "https://api.fragella.com/api/v1/usage",
-            headers={"x-api-key": key},
-            timeout=15,
-        )
-        st.write("HTTP status:", resp.status_code)
-        # Bei Erfolg JSON zeigen, sonst Text (gekürzt)
-        if resp.ok:
-            st.json(resp.json())
-        else:
-            st.code(resp.text[:800])
-    except Exception as e:
-        st.error(f"Request failed: {type(e).__name__}: {e}")
 else:
-    st.error("FRAGELLA_API_KEY not set in Streamlit Secrets.")
+    st.error(api_message)
+    st.markdown("""
+    <div class="footer">
+        <p style="color: #ff4b4b;">⚠️ API connection issues - Some features may be unavailable</p>
+        <p style="font-size: 0.8rem; margin-top: 0.5rem;">
+            Please check your API key configuration and try again
+        </p>
+    </div>
+    """, unsafe_allow_html=True)

@@ -102,15 +102,34 @@ def make_request(
             
             # Check for successful response
             if response.status_code == 200:
-                return response.json()
+                try:
+                    data = response.json()
+                    return data
+                except ValueError as e:
+                    st.error(f"Invalid JSON response: {str(e)}")
+                    return None
             
-            # Check for not found
+            # Check for specific error codes
+            elif response.status_code == 401:
+                st.error("❌ Authentication failed. Please check your API key.")
+                return None
+            elif response.status_code == 403:
+                st.error("❌ API key is invalid or incorrect.")
+                return None
             elif response.status_code == 404:
+                st.warning("⚠️ No results found.")
                 return None
             
             # Other error codes
             else:
-                st.warning(f"API returned status code: {response.status_code}")
+                error_msg = f"API returned status code: {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if isinstance(error_data, dict) and "message" in error_data:
+                        error_msg += f" - {error_data['message']}"
+                except:
+                    pass
+                st.warning(error_msg)
                 if attempt < retries - 1:
                     time.sleep(RETRY_DELAY)
                     continue
@@ -180,18 +199,37 @@ def search_fragrances(query: str, limit: int = 50) -> List[Dict[str, Any]]:
     
     # Handle different response formats
     if result:
-        # If result is a list, return it directly
+        fragrances = []
+        
+        # Extract fragrances list from response
         if isinstance(result, list):
-            return result
-        # If result is a dict with 'fragrances' key
-        elif isinstance(result, dict) and "fragrances" in result:
-            return result["fragrances"]
-        # If result is a dict with 'data' key
-        elif isinstance(result, dict) and "data" in result:
-            return result["data"]
-        # Otherwise return result wrapped in list
-        else:
-            return [result]
+            fragrances = result
+        elif isinstance(result, dict):
+            if "fragrances" in result:
+                fragrances = result["fragrances"]
+            elif "data" in result:
+                fragrances = result["data"]
+            else:
+                fragrances = [result]
+        
+        # Process each fragrance to ensure proper image URLs
+        for fragrance in fragrances:
+            if isinstance(fragrance, dict):
+                # Convert main image URL to transparent if possible
+                if "Image URL" in fragrance:
+                    fragrance["Image URL"] = get_transparent_image(fragrance["Image URL"])
+                elif "image_url" in fragrance:
+                    fragrance["Image URL"] = get_transparent_image(fragrance["image_url"])
+                    
+                # Process note images
+                if "Notes" in fragrance and isinstance(fragrance["Notes"], dict):
+                    for note_type in ["Top", "Middle", "Base"]:
+                        if note_type in fragrance["Notes"]:
+                            for note in fragrance["Notes"][note_type]:
+                                if "imageUrl" in note:
+                                    note["imageUrl"] = get_transparent_image(note["imageUrl"])
+        
+        return fragrances[:limit]
     
     return []
 
@@ -258,12 +296,14 @@ def similar_fragrances(name: str, limit: int = 20) -> List[Dict[str, Any]]:
     result = make_request("/fragrances/similar", params=params)
     
     if result:
-        if isinstance(result, list):
-            return result
+        if isinstance(result, dict) and "similar_fragrances" in result:
+            return result["similar_fragrances"][:limit]
+        elif isinstance(result, list):
+            return result[:limit]
         elif isinstance(result, dict) and "fragrances" in result:
-            return result["fragrances"]
+            return result["fragrances"][:limit]
         elif isinstance(result, dict) and "data" in result:
-            return result["data"]
+            return result["data"][:limit]
         else:
             return [result]
     
@@ -375,20 +415,35 @@ def get_transparent_image(image_url: str) -> str:
     """
     Convert image URL to transparent background version if available.
     
-    Fragella may provide .webp versions with transparent backgrounds.
+    Fragella provides .webp versions with transparent backgrounds for .jpg images.
+    This does not apply to fallback URLs.
     
     Args:
         image_url (str): Original image URL
     
     Returns:
         str: URL with transparent background or original URL
+        Empty string if invalid or no URL provided
     """
     if not image_url:
         return ""
     
-    # Try to replace .jpg with .webp for transparent background
-    if image_url.endswith(".jpg"):
-        return image_url.replace(".jpg", ".webp")
-    
-    return image_url
+    try:
+        # Check if URL is from Fragella CDN
+        if "d2k6fvhyk5xgx.cloudfront.net" not in image_url:
+            return image_url
+            
+        # Only convert main product images, not fallbacks
+        if "/images/" not in image_url:
+            return image_url
+            
+        # Try to replace .jpg with .webp for transparent background
+        if image_url.lower().endswith(".jpg"):
+            return image_url[:-4] + ".webp"
+        
+        return image_url
+        
+    except Exception as e:
+        st.warning(f"Error processing image URL: {str(e)}")
+        return image_url
 
