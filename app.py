@@ -246,3 +246,26 @@ except Exception as e:
     </div>
     """, unsafe_allow_html=True)
 
+import streamlit as st, requests
+
+st.subheader("Fragella API health check")
+key = st.secrets.get("FRAGELLA_API_KEY")
+st.write("Secret loaded:", bool(key))
+
+if key:
+    try:
+        resp = requests.get(
+            "https://api.fragella.com/api/v1/usage",
+            headers={"x-api-key": key},
+            timeout=15,
+        )
+        st.write("HTTP status:", resp.status_code)
+        # Bei Erfolg JSON zeigen, sonst Text (gekürzt)
+        if resp.ok:
+            st.json(resp.json())
+        else:
+            st.code(resp.text[:800])
+    except Exception as e:
+        st.error(f"Request failed: {type(e).__name__}: {e}")
+else:
+    st.error("FRAGELLA_API_KEY not set in Streamlit Secrets.")
