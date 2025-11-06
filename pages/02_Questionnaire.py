@@ -393,6 +393,3 @@ else:
                             st.rerun()
             
             st.write("")
-
-
-st.write("Ich bin Diego")
